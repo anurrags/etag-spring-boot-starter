@@ -96,24 +96,17 @@ public class EtagAspect {
         }
 
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
-        String[] parameterNames = signature.getParameterNames();
-        Object[] args = joinPoint.getArgs();
-
-        if (parameterNames == null) {
-            org.springframework.core.ParameterNameDiscoverer discoverer = new org.springframework.core.DefaultParameterNameDiscoverer();
-            parameterNames = discoverer.getParameterNames(signature.getMethod());
-        }
-
-        EvaluationContext context = new StandardEvaluationContext();
-
-        if (parameterNames != null) {
-            for (int i = 0; i < parameterNames.length; i++) {
-                // SpEL variables are accessed with #, so we set them as variables
-                context.setVariable(parameterNames[i], args[i]);
-            }
-        } else {
-            log.warn("Could not discover parameter names for method {}. SpEL evaluation might fail.", signature.getMethod().getName());
-        }
+        
+        // Use Spring's built-in Discoverer designed for Java 8+ reflection
+        org.springframework.core.ParameterNameDiscoverer discoverer = new org.springframework.core.StandardReflectionParameterNameDiscoverer();
+        
+        // This context seamlessly binds method parameters to "#" variables
+        EvaluationContext context = new org.springframework.context.expression.MethodBasedEvaluationContext(
+                joinPoint.getTarget(), 
+                signature.getMethod(), 
+                joinPoint.getArgs(), 
+                discoverer
+        );
 
         Expression expression = parser.parseExpression(spelExpression);
         return expression.getValue(context);
