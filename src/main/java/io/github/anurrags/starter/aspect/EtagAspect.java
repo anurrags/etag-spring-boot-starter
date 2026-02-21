@@ -96,17 +96,48 @@ public class EtagAspect {
         }
 
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+        java.lang.reflect.Method method = signature.getMethod();
+        Object[] args = joinPoint.getArgs();
+
+        EvaluationContext context = new StandardEvaluationContext();
         
-        // Use Spring's built-in Discoverer designed for Java 8+ reflection
-        org.springframework.core.ParameterNameDiscoverer discoverer = new org.springframework.core.StandardReflectionParameterNameDiscoverer();
-        
-        // This context seamlessly binds method parameters to "#" variables
-        EvaluationContext context = new org.springframework.context.expression.MethodBasedEvaluationContext(
-                joinPoint.getTarget(), 
-                signature.getMethod(), 
-                joinPoint.getArgs(), 
-                discoverer
-        );
+        // 1. First try Spring's standard discovery (works if compiled with -parameters)
+        org.springframework.core.ParameterNameDiscoverer discoverer = new org.springframework.core.DefaultParameterNameDiscoverer();
+        String[] parameterNames = discoverer.getParameterNames(method);
+
+        if (parameterNames != null && parameterNames.length == args.length) {
+            for (int i = 0; i < parameterNames.length; i++) {
+                context.setVariable(parameterNames[i], args[i]);
+            }
+        } 
+        // 2. FALLBACK: If parameter names are stripped (e.g., standard Maven/Gradle build without -parameters)
+        // We must manually find them by looking at @PathVariable or @RequestParam annotations!
+        else {
+            log.debug("Standard parameter discovery failed. Scanning for @PathVariable and @RequestParam annotations.");
+            java.lang.annotation.Annotation[][] parameterAnnotations = method.getParameterAnnotations();
+            
+            for (int i = 0; i < args.length; i++) {
+                String paramName = null;
+                for (java.lang.annotation.Annotation annotation : parameterAnnotations[i]) {
+                    if (annotation instanceof org.springframework.web.bind.annotation.PathVariable) {
+                        paramName = ((org.springframework.web.bind.annotation.PathVariable) annotation).value();
+                        if (paramName.isEmpty()) paramName = ((org.springframework.web.bind.annotation.PathVariable) annotation).name();
+                    } else if (annotation instanceof org.springframework.web.bind.annotation.RequestParam) {
+                        paramName = ((org.springframework.web.bind.annotation.RequestParam) annotation).value();
+                        if (paramName.isEmpty()) paramName = ((org.springframework.web.bind.annotation.RequestParam) annotation).name();
+                    }
+                }
+                
+                if (paramName != null && !paramName.isEmpty()) {
+                    log.debug("Discovered parameter name '{}' from annotation at index {}", paramName, i);
+                    context.setVariable(paramName, args[i]);
+                } else {
+                    // We can't find a name, provide a default indexed fallback like p0, p1, a0, a1
+                    context.setVariable("p" + i, args[i]);
+                    context.setVariable("a" + i, args[i]); 
+                }
+            }
+        }
 
         Expression expression = parser.parseExpression(spelExpression);
         return expression.getValue(context);
