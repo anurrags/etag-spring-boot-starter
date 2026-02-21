@@ -4,15 +4,26 @@ A simple, highly capable Spring Boot Starter to automate ETag-based HTTP caching
 
 ## Getting Started
 
-### 1. Add Dependency
+### 1. Add Repository and Dependency
 
-Add the starter dependency to your project's `pom.xml`:
+First, add the JitPack repository to your `pom.xml` just above the dependencies block:
+
+```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+```
+
+Then, add the starter dependency:
 
 ```xml
 <dependency>
-    <groupId>io.github.anurrags</groupId>
+    <groupId>com.github.anurrags</groupId>
     <artifactId>etag-spring-boot-starter</artifactId>
-    <version>0.0.1-SNAPSHOT</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 
