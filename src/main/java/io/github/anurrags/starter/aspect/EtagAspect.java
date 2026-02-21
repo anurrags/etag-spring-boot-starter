@@ -99,6 +99,11 @@ public class EtagAspect {
         String[] parameterNames = signature.getParameterNames();
         Object[] args = joinPoint.getArgs();
 
+        if (parameterNames == null) {
+            org.springframework.core.ParameterNameDiscoverer discoverer = new org.springframework.core.DefaultParameterNameDiscoverer();
+            parameterNames = discoverer.getParameterNames(signature.getMethod());
+        }
+
         EvaluationContext context = new StandardEvaluationContext();
 
         if (parameterNames != null) {
@@ -106,6 +111,8 @@ public class EtagAspect {
                 // SpEL variables are accessed with #, so we set them as variables
                 context.setVariable(parameterNames[i], args[i]);
             }
+        } else {
+            log.warn("Could not discover parameter names for method {}. SpEL evaluation might fail.", signature.getMethod().getName());
         }
 
         Expression expression = parser.parseExpression(spelExpression);
