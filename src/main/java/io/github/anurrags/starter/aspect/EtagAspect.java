@@ -27,7 +27,7 @@ public class EtagAspect {
     private final ApplicationContext applicationContext;
     private final ExpressionParser parser = new SpelExpressionParser();
 
-    @Around("@annotation(deepEtag)")
+    @Around("@annotation(deepEtag) && execution(* *(..))")
     public Object handleEtag(ProceedingJoinPoint joinPoint, DeepEtag deepEtag) throws Throwable {
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attributes == null) {
