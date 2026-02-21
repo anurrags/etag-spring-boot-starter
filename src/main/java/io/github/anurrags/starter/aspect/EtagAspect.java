@@ -29,8 +29,11 @@ public class EtagAspect {
 
     @Around("@annotation(deepEtag) && execution(* *(..))")
     public Object handleEtag(ProceedingJoinPoint joinPoint, DeepEtag deepEtag) throws Throwable {
+        log.debug("Intercepted method: {} with @DeepEtag", joinPoint.getSignature().toShortString());
+
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         if (attributes == null) {
+            log.debug("No ServletRequestAttributes found, proceeding without ETag.");
             return joinPoint.proceed();
         }
 
@@ -38,33 +41,50 @@ public class EtagAspect {
         HttpServletResponse response = attributes.getResponse();
 
         if (response == null) {
+            log.debug("HttpServletResponse is null, proceeding without ETag.");
             return joinPoint.proceed();
         }
 
         try {
+            log.debug("Evaluating SpEL expression: '{}'", deepEtag.key());
             Object evaluatedKey = evaluateSpelKey(joinPoint, deepEtag.key());
 
             if (evaluatedKey != null) {
+                log.debug("SpEL expression evaluated to key: {}", evaluatedKey);
+                
+                log.debug("Fetching EtagProvider bean of type: {}", deepEtag.provider().getSimpleName());
                 EtagProvider provider = applicationContext.getBean(deepEtag.provider());
+                
+                log.debug("Calling getVersion() on provider.");
                 String version = provider.getVersion(evaluatedKey);
                 
                 if (version != null) {
                     String currentEtag = version.startsWith("\"") ? version : "\"" + version + "\"";
+                    log.debug("Current computed ETag: {}", currentEtag);
     
                     String ifNoneMatch = request.getHeader("If-None-Match");
+                    log.debug("Received If-None-Match header: {}", ifNoneMatch);
     
                     if (currentEtag.equals(ifNoneMatch)) {
+                        log.debug("ETag matches If-None-Match. Returning 304 Not Modified. Controller method will NOT execute.");
                         response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
                         return null;
                     }
                     
+                    log.debug("ETag does not match or If-None-Match is missing. Proceeding to controller method.");
                     Object result = joinPoint.proceed();
+                    
+                    log.debug("Controller method executed. Setting ETag header on response.");
                     response.setHeader("ETag", currentEtag);
                     return result;
+                } else {
+                    log.debug("Provider returned null version. No ETag logic applied. Proceeding to controller.");
                 }
+            } else {
+                log.debug("Evaluated SpEL key was null. Cannot compute ETag. Proceeding to controller.");
             }
         } catch (Exception e) {
-            log.warn("Failed to evaluate ETag for request {}. Proceeding without ETag.", request.getRequestURI(), e);
+            log.warn("Failed to evaluate ETag for request {}. Proceeding to controller without ETag.", request.getRequestURI(), e);
         }
 
         return joinPoint.proceed();
