@@ -98,26 +98,38 @@ public class EtagAspect {
         MethodSignature signature = (MethodSignature) joinPoint.getSignature();
         java.lang.reflect.Method method = signature.getMethod();
         Object[] args = joinPoint.getArgs();
+        Object target = joinPoint.getTarget();
 
         EvaluationContext context = new StandardEvaluationContext();
+        java.util.List<String> registeredVariables = new java.util.ArrayList<>();
         
         // 1. First try Spring's standard discovery (works if compiled with -parameters)
         org.springframework.core.ParameterNameDiscoverer discoverer = new org.springframework.core.DefaultParameterNameDiscoverer();
         String[] parameterNames = discoverer.getParameterNames(method);
 
         if (parameterNames != null && parameterNames.length == args.length) {
+            log.debug("Standard discovery found parameter names: {}", java.util.Arrays.toString(parameterNames));
             for (int i = 0; i < parameterNames.length; i++) {
                 context.setVariable(parameterNames[i], args[i]);
+                registeredVariables.add(parameterNames[i]);
             }
         } 
-        // 2. FALLBACK: If parameter names are stripped (e.g., standard Maven/Gradle build without -parameters)
-        // We must manually find them by looking at @PathVariable or @RequestParam annotations!
-        else {
-            log.debug("Standard parameter discovery failed. Scanning for @PathVariable and @RequestParam annotations.");
-            java.lang.annotation.Annotation[][] parameterAnnotations = method.getParameterAnnotations();
-            
-            for (int i = 0; i < args.length; i++) {
-                String paramName = null;
+        
+        // 2. Fallback explicitly into the raw annotations to catch stripped JVM arguments.
+        // Proxies (JDK/CGLIB) strip annotations from the interface! We MUST check the target class method directly.
+        java.lang.annotation.Annotation[][] parameterAnnotations = method.getParameterAnnotations();
+        if (target != null) {
+            try {
+                java.lang.reflect.Method targetMethod = target.getClass().getMethod(method.getName(), method.getParameterTypes());
+                parameterAnnotations = targetMethod.getParameterAnnotations();
+            } catch (Exception e) {
+                log.debug("Could not resolve target method for annotation scanning: {}", e.getMessage());
+            }
+        }
+
+        for (int i = 0; i < args.length; i++) {
+            String paramName = null;
+            if (i < parameterAnnotations.length) {
                 for (java.lang.annotation.Annotation annotation : parameterAnnotations[i]) {
                     if (annotation instanceof org.springframework.web.bind.annotation.PathVariable) {
                         paramName = ((org.springframework.web.bind.annotation.PathVariable) annotation).value();
@@ -127,17 +139,20 @@ public class EtagAspect {
                         if (paramName.isEmpty()) paramName = ((org.springframework.web.bind.annotation.RequestParam) annotation).name();
                     }
                 }
-                
-                if (paramName != null && !paramName.isEmpty()) {
-                    log.debug("Discovered parameter name '{}' from annotation at index {}", paramName, i);
-                    context.setVariable(paramName, args[i]);
-                } else {
-                    // We can't find a name, provide a default indexed fallback like p0, p1, a0, a1
-                    context.setVariable("p" + i, args[i]);
-                    context.setVariable("a" + i, args[i]); 
-                }
             }
+            
+            if (paramName != null && !paramName.isEmpty()) {
+                context.setVariable(paramName, args[i]);
+                if (!registeredVariables.contains(paramName)) registeredVariables.add(paramName);
+            }
+            
+            // 3. Always provide a default indexed fallback like p0, p1, a0, a1 (to support generic `#a0` style lookups)
+            context.setVariable("p" + i, args[i]);
+            context.setVariable("a" + i, args[i]); 
+            if (!registeredVariables.contains("p" + i)) registeredVariables.add("p" + i + " & a" + i);
         }
+        
+        log.debug("SpEL Context populated with following available variables for `#`: {}", registeredVariables);
 
         Expression expression = parser.parseExpression(spelExpression);
         return expression.getValue(context);
